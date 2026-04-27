@@ -1,0 +1,89 @@
+CREATE DATABASE IF NOT EXISTS quorex CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE quorex;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  role ENUM('superadmin','collaborator') NOT NULL DEFAULT 'collaborator',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_login DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS todo_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(500) NOT NULL,
+  note TEXT,
+  phase ENUM('fire','build','grow','later') NOT NULL,
+  tag VARCHAR(100),
+  is_done TINYINT(1) NOT NULL DEFAULT 0,
+  position INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_templates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  subject VARCHAR(500) NOT NULL,
+  body LONGTEXT NOT NULL,
+  email_number INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cold_email_rules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  type ENUM('absolute_rule','personalization_rule','sending_rule') NOT NULL,
+  content TEXT NOT NULL,
+  position INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS scale_phases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  phase_number INT NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  subtitle VARCHAR(255),
+  period VARCHAR(100),
+  badge_color VARCHAR(100),
+  mrr_target VARCHAR(100),
+  kpi_label VARCHAR(255),
+  kpi_description TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS scale_actions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  phase_id INT NOT NULL,
+  week_label VARCHAR(100),
+  title VARCHAR(500) NOT NULL,
+  body TEXT,
+  position INT NOT NULL DEFAULT 0,
+  FOREIGN KEY (phase_id) REFERENCES scale_phases(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS scale_blockers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  phase_id INT NOT NULL,
+  severity INT NOT NULL DEFAULT 1,
+  title VARCHAR(500) NOT NULL,
+  description TEXT,
+  fix_text TEXT,
+  position INT NOT NULL DEFAULT 0,
+  FOREIGN KEY (phase_id) REFERENCES scale_phases(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS invitations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  token VARCHAR(255) NOT NULL UNIQUE,
+  role ENUM('collaborator') NOT NULL DEFAULT 'collaborator',
+  invited_by INT NOT NULL,
+  accepted_at DATETIME NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+);
