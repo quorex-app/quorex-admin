@@ -23,10 +23,6 @@ async function seed() {
     data: { email: 'admin@quorex.io', password_hash, name: 'Admin', role: 'superadmin' },
   });
 
-  const samy_hash = await bcrypt.hash(process.env.SEED_SAMY_PASSWORD || 'Samy74460@', 12);
-  await prisma.user.create({
-    data: { email: 'samy74.hamdi@outlook.fr', password_hash: samy_hash, name: 'Samy', role: 'collaborator' },
-  });
   console.log('Created superadmin user');
 
   // ─── Todos ─────────────────────────────────────────────────────────────────
