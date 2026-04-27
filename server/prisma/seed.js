@@ -1,100 +1,91 @@
 require('dotenv').config();
-const mysql = require('mysql2/promise');
+const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
+const prisma = new PrismaClient();
+
 async function seed() {
-  const conn = await mysql.createConnection({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    multipleStatements: true,
+  console.log('Cleaning existing data...');
+
+  // Delete in dependency order
+  await prisma.invitation.deleteMany();
+  await prisma.scaleBlocker.deleteMany();
+  await prisma.scaleAction.deleteMany();
+  await prisma.scalePhase.deleteMany();
+  await prisma.coldEmailRule.deleteMany();
+  await prisma.emailTemplate.deleteMany();
+  await prisma.todoItem.deleteMany();
+  await prisma.user.deleteMany();
+
+  // ─── Superadmin ────────────────────────────────────────────────────────────
+  const password_hash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'Admin1234!', 12);
+  await prisma.user.create({
+    data: { email: 'admin@quorex.io', password_hash, name: 'Admin', role: 'superadmin' },
   });
 
-  console.log('Connected to MySQL');
-
-  // Clear existing data
-  await conn.query(`SET FOREIGN_KEY_CHECKS=0`);
-  await conn.query(`TRUNCATE TABLE scale_blockers`);
-  await conn.query(`TRUNCATE TABLE scale_actions`);
-  await conn.query(`TRUNCATE TABLE scale_phases`);
-  await conn.query(`TRUNCATE TABLE cold_email_rules`);
-  await conn.query(`TRUNCATE TABLE email_templates`);
-  await conn.query(`TRUNCATE TABLE todo_items`);
-  await conn.query(`TRUNCATE TABLE invitations`);
-  await conn.query(`TRUNCATE TABLE users`);
-  await conn.query(`SET FOREIGN_KEY_CHECKS=1`);
-
-  // Superadmin user
-  const passwordHash = await bcrypt.hash('Admin1234!', 12);
-  await conn.query(
-    `INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)`,
-    ['admin@quorex.io', passwordHash, 'Admin', 'superadmin']
-  );
+  const samy_hash = await bcrypt.hash(process.env.SEED_SAMY_PASSWORD || 'Samy74460@', 12);
+  await prisma.user.create({
+    data: { email: 'samy74.hamdi@outlook.fr', password_hash: samy_hash, name: 'Samy', role: 'collaborator' },
+  });
   console.log('Created superadmin user');
 
-  // Todo items
-  const todos = [
-    // FIRE phase
-    { title: "Créer un Stripe Payment Link à $49/mois", note: "stripe.com → Payment Links → 5 min. Pas besoin de code. C'est le seul produit qui existe aujourd'hui.", phase: 'fire', tag: 'Maintenant', position: 1 },
-    { title: "Rédiger les 3 emails de la séquence cold (hook peur, cas concret, breakup)", note: "Copier les templates de la stratégie de contenu. S'inspirer du hook #1 et #5 de la hook bank.", phase: 'fire', tag: 'Maintenant', position: 2 },
-    { title: "Envoyer 10 cold emails à la main à des CTOs LinkedIn — sans outil", note: "Pas d'Instantly pour l'instant. 10 emails personnalisés à la main = 10x plus fort. Objectif : 3 réponses en 48h.", phase: 'fire', tag: 'Maintenant', position: 3 },
-    { title: "Créer la landing page presell (Carrd ou Framer)", note: "Titre : 'Votre ex-employé a encore accès à votre GitHub'. CTA : lien Stripe. 1 heure max. Pas de design.", phase: 'fire', tag: "Aujourd'hui", position: 4 },
-    { title: "Publier le premier post LinkedIn (confession + chiffre)", note: "Hook #2 ou #5 de la hook bank. Lien landing en commentaire épinglé. Publier à 8h ou 12h.", phase: 'fire', tag: "Aujourd'hui", position: 5 },
-    // BUILD phase
-    { title: "Configurer le domaine email dédié pour le cold email", note: "Ex: hello@quorex.io. Protège ta réputation email principale. Namecheap + MX Cloudflare.", phase: 'build', tag: "Aujourd'hui", position: 1 },
-    { title: "Charger les 300 CTOs dans Instantly et lancer la séquence automatisée", note: "Scraper LinkedIn Sales Nav : CTO + startup + 10-60 sal. + Seed ou Série A.", phase: 'build', tag: 'Semaine 1', position: 2 },
-    { title: "Init projet Next.js 14 + Supabase + Prisma + deploy Vercel", note: "npx create-next-app@latest. Connecter Supabase. Schéma DB : users, orgs, connected_apps, members, offboarding_events.", phase: 'build', tag: 'Semaine 1', position: 3 },
-    { title: "Auth Supabase (email + password) + protection des routes", note: "Pages : /login, /signup, /dashboard. Middleware Supabase pour protéger les routes authentifiées.", phase: 'build', tag: 'Semaine 1', position: 4 },
-    { title: "Intégration Stripe dans l'app (webhook → activer compte post-paiement)", note: "Stripe Checkout + webhook stripe pour passer le compte en 'actif' après paiement réussi.", phase: 'build', tag: 'Semaine 1', position: 5 },
-    { title: "OAuth GitHub : connexion Org + pull membres + révocation", note: "SDK Octokit. Flow : bouton connecter → OAuth callback → stocker token chiffré → pull membres → révocation API.", phase: 'build', tag: 'Semaine 1', position: 6 },
-    { title: "Rejoindre 5 communautés Slack/Discord CTOs et observer 48h avant de poster", note: "CTO Craft, French Tech, Indie Hackers, Rands Leadership Slack.", phase: 'build', tag: 'Semaine 1', position: 7 },
-    // GROW phase
-    { title: "OAuth Notion : connexion workspace + pull membres + révocation", note: "SDK @notionhq/client. Même pattern que GitHub.", phase: 'grow', tag: 'Semaine 2', position: 1 },
-    { title: "OAuth Slack : connexion workspace + désactivation membres", note: "SDK @slack/web-api. Attention : nécessite un token admin Slack avec scope users:write.", phase: 'grow', tag: 'Semaine 2', position: 2 },
-    { title: "Vue inventaire consolidée (1 tableau : nom / email / apps / statut)", note: "Afficher tous les membres de toutes les apps connectées dans une seule vue.", phase: 'grow', tag: 'Semaine 2', position: 3 },
-    { title: "Flow offboarding complet : sélection → preview → révocation cascade → feedback temps réel", note: "Le core du produit. GitHub + Notion + Slack en séquence.", phase: 'grow', tag: 'Semaine 2', position: 4 },
-    { title: "Génération PDF rapport avec React-PDF", note: "@react-pdf/renderer. Template simple. Fonctionnel > beau.", phase: 'grow', tag: 'Semaine 2', position: 5 },
-    { title: "Email automatique post-offboarding avec PDF en PJ (Resend)", note: "Resend setup en 15 min.", phase: 'grow', tag: 'Semaine 2', position: 6 },
-    { title: "Poster dans 1 communauté Slack (format retour terrain)", note: "Histoire anonymisée. Lien en commentaire si quelqu'un demande.", phase: 'grow', tag: 'Semaine 2', position: 7 },
-    { title: "Page historique offboardings (liste + lien PDF)", note: "Vue simple. Date, nom, apps révoquées, télécharger PDF.", phase: 'grow', tag: 'Semaine 3', position: 8 },
-    { title: "Onboarding flow (steps : connecter app → importer membres → offboarding test)", note: "3 étapes visuelles après signup.", phase: 'grow', tag: 'Semaine 3', position: 9 },
-    { title: "Beta test avec 2-3 presell clients — call Loom 15 min chacun", note: "Observer sans guider. Note chaque hésitation.", phase: 'grow', tag: 'Semaine 3', position: 10 },
-    { title: "Passer de $49 presell à $99/mois officiel sur Stripe", note: "Créer le nouveau Payment Link + mettre à jour la landing.", phase: 'grow', tag: 'Semaine 3', position: 11 },
-    { title: "Post LinkedIn 'on est live' (J21)", note: "1 seul post. Lien direct vers la landing $99/mois. Publier à 8h un mardi ou jeudi.", phase: 'grow', tag: 'Semaine 3', position: 12 },
-    // LATER phase
-    { title: "Contacter 20 consultants SOC2 pour partenariat (25% commission)", note: "Seulement après avoir un client qui a utilisé le rapport PDF pour un audit SOC2 réel.", phase: 'later', tag: null, position: 1 },
-    { title: "Emails de nurturing automatiques (J+3 si pas connecté d'app, J+7 si pas d'offboarding)", note: "Resend séquences.", phase: 'later', tag: null, position: 2 },
-    { title: "Programme referral client (1 mois offert pour chaque client référé)", note: "Rewardful ou Partnero. Activer à 15+ clients.", phase: 'later', tag: null, position: 3 },
-    { title: "Ajouter intégrations Figma + Linear + Vercel", note: "Uniquement si 5+ clients demandent la même intégration.", phase: 'later', tag: null, position: 4 },
-    { title: "LinkedIn Ads retargeting ($10/jour, visiteurs landing)", note: "Activer uniquement si trafic landing > 500 visiteurs/mois.", phase: 'later', tag: null, position: 5 },
-    { title: "Détecter shadow IT / OAuth grants tiers lors de l'offboarding", note: "Feature haute valeur. V2 minimum.", phase: 'later', tag: null, position: 6 },
-    { title: "Alertes post-départ si un accès se reconnecte", note: "Webhook-based monitoring. Version 2.", phase: 'later', tag: null, position: 7 },
-    { title: "Premier article SEO (offboarding IT startup SOC2)", note: "ROI à 90 jours minimum.", phase: 'later', tag: null, position: 8 },
-    { title: "Recruter un freelance 20h/semaine si $3K MRR stable", note: "Budget $800-1 200/mois. Ne pas recruter avant.", phase: 'later', tag: null, position: 9 },
-    { title: "Plan Scale $199 + API publique + onboarding 1:1", note: "Proposer uniquement si un client le demande.", phase: 'later', tag: null, position: 10 },
-  ];
+  // ─── Todos ─────────────────────────────────────────────────────────────────
+  await prisma.todoItem.createMany({
+    data: [
+      // FIRE
+      { title: "Créer un Stripe Payment Link à $49/mois", note: "stripe.com → Payment Links → 5 min. Pas besoin de code. C'est le seul produit qui existe aujourd'hui.", phase: 'fire', tag: 'Maintenant', position: 1 },
+      { title: "Rédiger les 3 emails de la séquence cold (hook peur, cas concret, breakup)", note: "Copier les templates de la stratégie de contenu. S'inspirer du hook #1 et #5 de la hook bank.", phase: 'fire', tag: 'Maintenant', position: 2 },
+      { title: "Envoyer 10 cold emails à la main à des CTOs LinkedIn — sans outil", note: "Pas d'Instantly pour l'instant. 10 emails personnalisés à la main = 10x plus fort. Objectif : 3 réponses en 48h.", phase: 'fire', tag: 'Maintenant', position: 3 },
+      { title: "Créer la landing page presell (Carrd ou Framer)", note: "Titre : 'Votre ex-employé a encore accès à votre GitHub'. CTA : lien Stripe. 1 heure max. Pas de design.", phase: 'fire', tag: "Aujourd'hui", position: 4 },
+      { title: "Publier le premier post LinkedIn (confession + chiffre)", note: "Hook #2 ou #5 de la hook bank. Lien landing en commentaire épinglé. Publier à 8h ou 12h.", phase: 'fire', tag: "Aujourd'hui", position: 5 },
+      // BUILD
+      { title: "Configurer le domaine email dédié pour le cold email", note: "Ex: hello@quorex.io. Protège ta réputation email principale. Namecheap + MX Cloudflare.", phase: 'build', tag: "Aujourd'hui", position: 1 },
+      { title: "Charger les 300 CTOs dans Instantly et lancer la séquence automatisée", note: "Scraper LinkedIn Sales Nav : CTO + startup + 10-60 sal. + Seed ou Série A.", phase: 'build', tag: 'Semaine 1', position: 2 },
+      { title: "Init projet Next.js 14 + Supabase + Prisma + deploy Vercel", note: "npx create-next-app@latest. Connecter Supabase. Schéma DB : users, orgs, connected_apps, members, offboarding_events.", phase: 'build', tag: 'Semaine 1', position: 3 },
+      { title: "Auth Supabase (email + password) + protection des routes", note: "Pages : /login, /signup, /dashboard. Middleware Supabase pour protéger les routes authentifiées.", phase: 'build', tag: 'Semaine 1', position: 4 },
+      { title: "Intégration Stripe dans l'app (webhook → activer compte post-paiement)", note: "Stripe Checkout + webhook stripe pour passer le compte en 'actif' après paiement réussi.", phase: 'build', tag: 'Semaine 1', position: 5 },
+      { title: "OAuth GitHub : connexion Org + pull membres + révocation", note: "SDK Octokit. Flow : bouton connecter → OAuth callback → stocker token chiffré → pull membres → révocation API.", phase: 'build', tag: 'Semaine 1', position: 6 },
+      { title: "Rejoindre 5 communautés Slack/Discord CTOs et observer 48h avant de poster", note: "CTO Craft, French Tech, Indie Hackers, Rands Leadership Slack.", phase: 'build', tag: 'Semaine 1', position: 7 },
+      // GROW
+      { title: "OAuth Notion : connexion workspace + pull membres + révocation", note: "SDK @notionhq/client. Même pattern que GitHub.", phase: 'grow', tag: 'Semaine 2', position: 1 },
+      { title: "OAuth Slack : connexion workspace + désactivation membres", note: "SDK @slack/web-api. Attention : nécessite un token admin Slack avec scope users:write.", phase: 'grow', tag: 'Semaine 2', position: 2 },
+      { title: "Vue inventaire consolidée (1 tableau : nom / email / apps / statut)", note: "Afficher tous les membres de toutes les apps connectées dans une seule vue.", phase: 'grow', tag: 'Semaine 2', position: 3 },
+      { title: "Flow offboarding complet : sélection → preview → révocation cascade → feedback temps réel", note: "Le core du produit. GitHub + Notion + Slack en séquence.", phase: 'grow', tag: 'Semaine 2', position: 4 },
+      { title: "Génération PDF rapport avec React-PDF", note: "@react-pdf/renderer. Template simple. Fonctionnel > beau.", phase: 'grow', tag: 'Semaine 2', position: 5 },
+      { title: "Email automatique post-offboarding avec PDF en PJ (Resend)", note: "Resend setup en 15 min.", phase: 'grow', tag: 'Semaine 2', position: 6 },
+      { title: "Poster dans 1 communauté Slack (format retour terrain)", note: "Histoire anonymisée. Lien en commentaire si quelqu'un demande.", phase: 'grow', tag: 'Semaine 2', position: 7 },
+      { title: "Page historique offboardings (liste + lien PDF)", note: "Vue simple. Date, nom, apps révoquées, télécharger PDF.", phase: 'grow', tag: 'Semaine 3', position: 8 },
+      { title: "Onboarding flow (steps : connecter app → importer membres → offboarding test)", note: "3 étapes visuelles après signup.", phase: 'grow', tag: 'Semaine 3', position: 9 },
+      { title: "Beta test avec 2-3 presell clients — call Loom 15 min chacun", note: "Observer sans guider. Note chaque hésitation.", phase: 'grow', tag: 'Semaine 3', position: 10 },
+      { title: "Passer de $49 presell à $99/mois officiel sur Stripe", note: "Créer le nouveau Payment Link + mettre à jour la landing.", phase: 'grow', tag: 'Semaine 3', position: 11 },
+      { title: "Post LinkedIn 'on est live' (J21)", note: "1 seul post. Lien direct vers la landing $99/mois. Publier à 8h un mardi ou jeudi.", phase: 'grow', tag: 'Semaine 3', position: 12 },
+      // LATER
+      { title: "Contacter 20 consultants SOC2 pour partenariat (25% commission)", note: "Seulement après avoir un client qui a utilisé le rapport PDF pour un audit SOC2 réel.", phase: 'later', position: 1 },
+      { title: "Emails de nurturing automatiques (J+3 si pas connecté d'app, J+7 si pas d'offboarding)", note: "Resend séquences.", phase: 'later', position: 2 },
+      { title: "Programme referral client (1 mois offert pour chaque client référé)", note: "Rewardful ou Partnero. Activer à 15+ clients.", phase: 'later', position: 3 },
+      { title: "Ajouter intégrations Figma + Linear + Vercel", note: "Uniquement si 5+ clients demandent la même intégration.", phase: 'later', position: 4 },
+      { title: "LinkedIn Ads retargeting ($10/jour, visiteurs landing)", note: "Activer uniquement si trafic landing > 500 visiteurs/mois.", phase: 'later', position: 5 },
+      { title: "Détecter shadow IT / OAuth grants tiers lors de l'offboarding", note: "Feature haute valeur. V2 minimum.", phase: 'later', position: 6 },
+      { title: "Alertes post-départ si un accès se reconnecte", note: "Webhook-based monitoring. Version 2.", phase: 'later', position: 7 },
+      { title: "Premier article SEO (offboarding IT startup SOC2)", note: "ROI à 90 jours minimum.", phase: 'later', position: 8 },
+      { title: "Recruter un freelance 20h/semaine si $3K MRR stable", note: "Budget $800-1 200/mois. Ne pas recruter avant.", phase: 'later', position: 9 },
+      { title: "Plan Scale $199 + API publique + onboarding 1:1", note: "Proposer uniquement si un client le demande.", phase: 'later', position: 10 },
+    ],
+  });
+  console.log('Inserted 32 todos');
 
-  for (const t of todos) {
-    await conn.query(
-      `INSERT INTO todo_items (title, note, phase, tag, is_done, position) VALUES (?, ?, ?, ?, 0, ?)`,
-      [t.title, t.note || null, t.phase, t.tag || null, t.position]
-    );
-  }
-  console.log(`Inserted ${todos.length} todos`);
-
-  // Email templates
-  const emails = [
-    {
-      email_number: 1,
-      name: 'Email 1 — Hook (Peur)',
-      subject: JSON.stringify([
-        "Les accès de [Prénom ex-employé] chez [Startup]",
-        "Vos ex-employés ont encore accès à quoi ?",
-        "Question rapide sur [Startup] + GitHub"
-      ]),
-      body: `[Prénom],
+  // ─── Email templates ────────────────────────────────────────────────────────
+  await prisma.emailTemplate.createMany({
+    data: [
+      {
+        email_number: 1,
+        name: 'Email 1 — Hook (Peur)',
+        subject: JSON.stringify([
+          "Les accès de [Prénom ex-employé] chez [Startup]",
+          "Vos ex-employés ont encore accès à quoi ?",
+          "Question rapide sur [Startup] + GitHub",
+        ]),
+        body: `[Prénom],
 
 Est-ce que [Startup] a un process pour révoquer les accès quand quelqu'un part ?
 
@@ -107,14 +98,12 @@ Je construis un outil qui règle ça en 5 minutes. Je cherche des fondateurs tec
 Vous avez eu des départs récents chez [Startup] ?
 
 [Ton prénom]`,
-    },
-    {
-      email_number: 2,
-      name: 'Email 2 — Preuve (Cas concret)',
-      subject: JSON.stringify([
-        "Re: Les accès de [Startup]"
-      ]),
-      body: `[Prénom],
+      },
+      {
+        email_number: 2,
+        name: 'Email 2 — Preuve (Cas concret)',
+        subject: JSON.stringify(["Re: Les accès de [Startup]"]),
+        body: `[Prénom],
 
 En 2022, un ex-employé de Cash App a téléchargé les données de 8,2 millions de clients après son départ. Personne ne l'a détecté pendant 4 mois. Résultat : class action lawsuit + $500K d'amende.
 
@@ -135,14 +124,12 @@ Prix : 49€/mois à vie (vs 99€ au lancement). Garanti remboursé sous 30 jou
 Ça vous parle ?
 
 [Ton prénom]`,
-    },
-    {
-      email_number: 3,
-      name: 'Email 3 — Breakup',
-      subject: JSON.stringify([
-        "Dernière tentative — [Startup]"
-      ]),
-      body: `[Prénom],
+      },
+      {
+        email_number: 3,
+        name: 'Email 3 — Breakup',
+        subject: JSON.stringify(["Dernière tentative — [Startup]"]),
+        body: `[Prénom],
 
 Je referme l'accès early adopter cette semaine — il me reste 8 places au tarif $49/mois.
 
@@ -159,43 +146,29 @@ Dans tous les cas, bonne continuation.
 [Ton prénom]
 
 P.S. Si vous avez quelqu'un dans votre réseau pour qui c'est plus urgent, je suis preneur d'une intro.`,
-    },
-  ];
-
-  for (const e of emails) {
-    await conn.query(
-      `INSERT INTO email_templates (name, subject, body, email_number) VALUES (?, ?, ?, ?)`,
-      [e.name, e.subject, e.body, e.email_number]
-    );
-  }
+      },
+    ],
+  });
   console.log('Inserted email templates');
 
-  // Cold email rules
-  const rules = [
-    // absolute rule
-    { type: 'absolute_rule', content: "Ces emails sont courts par design. Pas de présentation de l'entreprise. Pas de liste de features. Pas de 'j'espère que ce message vous trouve bien.' Le CTO qui reçoit ça lit en 20 secondes et répond ou pas. Un email plus long = moins de réponses, pas plus.", position: 1 },
-    // personalization rules
-    { type: 'personalization_rule', content: "Remplacer [Prénom] par le prénom du prospect — jamais 'Bonjour' seul", position: 1 },
-    { type: 'personalization_rule', content: "Remplacer [Startup] par le vrai nom de l'entreprise — visible sur LinkedIn", position: 2 },
-    { type: 'personalization_rule', content: "Remplacer [app spécifique] par une app que tu sais qu'ils utilisent", position: 3 },
-    { type: 'personalization_rule', content: "Ton prénom en signature = ton vrai prénom. Pas 'L'équipe Quorex'", position: 4 },
-    { type: 'personalization_rule', content: "Envoyer depuis un domaine dédié (ex: prenom@quorex.io) — jamais depuis Gmail perso", position: 5 },
-    // sending rules
-    { type: 'sending_rule', content: "Email 1 : Mardi ou jeudi, 8h-9h ou 17h-18h. Éviter lundi matin et vendredi après-midi.", position: 1 },
-    { type: 'sending_rule', content: "Email 2 : J+3 exactement. Si réponse reçue à E1 → ne pas envoyer E2.", position: 2 },
-    { type: 'sending_rule', content: "Email 3 : J+7. Dernier contact. Si pas de réponse → relance dans 3 mois.", position: 3 },
-  ];
-
-  for (const r of rules) {
-    await conn.query(
-      `INSERT INTO cold_email_rules (type, content, position) VALUES (?, ?, ?)`,
-      [r.type, r.content, r.position]
-    );
-  }
+  // ─── Cold email rules ───────────────────────────────────────────────────────
+  await prisma.coldEmailRule.createMany({
+    data: [
+      { type: 'absolute_rule', content: "Ces emails sont courts par design. Pas de présentation de l'entreprise. Pas de liste de features. Pas de 'j'espère que ce message vous trouve bien.' Le CTO qui reçoit ça lit en 20 secondes et répond ou pas. Un email plus long = moins de réponses, pas plus.", position: 1 },
+      { type: 'personalization_rule', content: "Remplacer [Prénom] par le prénom du prospect — jamais 'Bonjour' seul", position: 1 },
+      { type: 'personalization_rule', content: "Remplacer [Startup] par le vrai nom de l'entreprise — visible sur LinkedIn", position: 2 },
+      { type: 'personalization_rule', content: "Remplacer [app spécifique] par une app que tu sais qu'ils utilisent", position: 3 },
+      { type: 'personalization_rule', content: "Ton prénom en signature = ton vrai prénom. Pas 'L'équipe Quorex'", position: 4 },
+      { type: 'personalization_rule', content: "Envoyer depuis un domaine dédié (ex: prenom@quorex.io) — jamais depuis Gmail perso", position: 5 },
+      { type: 'sending_rule', content: "Email 1 : Mardi ou jeudi, 8h-9h ou 17h-18h. Éviter lundi matin et vendredi après-midi.", position: 1 },
+      { type: 'sending_rule', content: "Email 2 : J+3 exactement. Si réponse reçue à E1 → ne pas envoyer E2.", position: 2 },
+      { type: 'sending_rule', content: "Email 3 : J+7. Dernier contact. Si pas de réponse → relance dans 3 mois.", position: 3 },
+    ],
+  });
   console.log('Inserted cold email rules');
 
-  // Scale phases
-  const phases = [
+  // ─── Scale phases ───────────────────────────────────────────────────────────
+  const phasesData = [
     {
       phase_number: 1,
       title: 'Valider & Presell',
@@ -290,34 +263,24 @@ P.S. Si vous avez quelqu'un dans votre réseau pour qui c'est plus urgent, je su
     },
   ];
 
-  for (const phase of phases) {
-    const [result] = await conn.query(
-      `INSERT INTO scale_phases (phase_number, title, subtitle, period, badge_color, mrr_target, kpi_label, kpi_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [phase.phase_number, phase.title, phase.subtitle, phase.period, phase.badge_color, phase.mrr_target, phase.kpi_label, phase.kpi_description]
-    );
-    const phaseId = result.insertId;
-
-    for (const action of phase.actions) {
-      await conn.query(
-        `INSERT INTO scale_actions (phase_id, week_label, title, body, position) VALUES (?, ?, ?, ?, ?)`,
-        [phaseId, action.week_label, action.title, action.body, action.position]
-      );
-    }
-
-    for (const blocker of phase.blockers) {
-      await conn.query(
-        `INSERT INTO scale_blockers (phase_id, severity, title, description, fix_text, position) VALUES (?, ?, ?, ?, ?, ?)`,
-        [phaseId, blocker.severity, blocker.title, blocker.description, blocker.fix_text, blocker.position]
-      );
-    }
+  for (const phaseData of phasesData) {
+    const { actions, blockers, ...phaseFields } = phaseData;
+    const phase = await prisma.scalePhase.create({
+      data: {
+        ...phaseFields,
+        actions: { createMany: { data: actions } },
+        blockers: { createMany: { data: blockers } },
+      },
+    });
+    console.log(`Inserted phase ${phase.phase_number}: ${phase.title}`);
   }
-  console.log('Inserted scale phases, actions, and blockers');
 
-  await conn.end();
-  console.log('Seed complete!');
+  console.log('\nSeed complete!');
 }
 
-seed().catch(err => {
-  console.error('Seed error:', err);
-  process.exit(1);
-});
+seed()
+  .catch((err) => {
+    console.error('Seed error:', err);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());

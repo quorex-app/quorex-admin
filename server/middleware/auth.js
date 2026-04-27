@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const pool = require('../db/pool');
+const prisma = require('../db/prisma');
 
 async function authMiddleware(req, res, next) {
   const token = req.cookies?.token;
@@ -8,17 +8,24 @@ async function authMiddleware(req, res, next) {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const [rows] = await pool.query(
-      'SELECT id, email, name, role, is_active FROM users WHERE id = ?',
-      [decoded.userId]
-    );
-    if (!rows.length || !rows[0].is_active) {
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { id: true, email: true, name: true, role: true, is_active: true },
+    });
+    if (!user || !user.is_active) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    req.user = rows[0];
+    req.user = user;
     next();
-  } catch {
-    return res.status(401).json({ error: 'Unauthorized' });
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    if (err.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    console.error('Auth middleware error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
 }
 

@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  superadmin
+  collaborator
+}
+
+enum Phase {
+  fire
+  build
+  grow
+  later
+}
+
+enum RuleType {
+  absolute_rule
+  personalization_rule
+  sending_rule
+}
+
+model User {
+  id            Int          @id @default(autoincrement())
+  email         String       @unique
+  password_hash String
+  name          String
+  role          Role         @default(collaborator)
+  is_active     Boolean      @default(true)
+  last_login    DateTime?
+  created_at    DateTime     @default(now())
+  invitations   Invitation[] @relation("InvitedBy")
+
+  @@map("users")
+}
+
+model TodoItem {
+  id         Int      @id @default(autoincrement())
+  title      String
+  note       String?
+  phase      Phase
+  tag        String?
+  is_done    Boolean  @default(false)
+  position   Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("todo_items")
+}
+
+model EmailTemplate {
+  id           Int      @id @default(autoincrement())
+  name         String
+  subject      String
+  body         String
+  email_number Int
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  @@map("email_templates")
+}
+
+model ColdEmailRule {
+  id         Int      @id @default(autoincrement())
+  type       RuleType
+  content    String
+  position   Int      @default(0)
+  created_at DateTime @default(now())
+
+  @@map("cold_email_rules")
+}
+
+model ScalePhase {
+  id              Int            @id @default(autoincrement())
+  phase_number    Int
+  title           String
+  subtitle        String?
+  period          String?
+  badge_color     String?
+  mrr_target      String?
+  kpi_label       String?
+  kpi_description String?
+  created_at      DateTime       @default(now())
+  actions         ScaleAction[]
+  blockers        ScaleBlocker[]
+
+  @@map("scale_phases")
+}
+
+model ScaleAction {
+  id         Int        @id @default(autoincrement())
+  phase_id   Int
+  week_label String?
+  title      String
+  body       String?
+  position   Int        @default(0)
+  phase      ScalePhase @relation(fields: [phase_id], references: [id], onDelete: Cascade)
+
+  @@map("scale_actions")
+}
+
+model ScaleBlocker {
+  id          Int        @id @default(autoincrement())
+  phase_id    Int
+  severity    Int        @default(1)
+  title       String
+  description String?
+  fix_text    String?
+  position    Int        @default(0)
+  phase       ScalePhase @relation(fields: [phase_id], references: [id], onDelete: Cascade)
+
+  @@map("scale_blockers")
+}
+
+model Invitation {
+  id          Int       @id @default(autoincrement())
+  email       String
+  token       String    @unique
+  role        Role      @default(collaborator)
+  invited_by  Int
+  accepted_at DateTime?
+  expires_at  DateTime
+  created_at  DateTime  @default(now())
+  invitedBy   User      @relation("InvitedBy", fields: [invited_by], references: [id], onDelete: Cascade)
+
+  @@map("invitations")
+}

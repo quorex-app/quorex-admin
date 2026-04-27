@@ -1,23 +1,27 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const pool = require('../db/pool');
+const prisma = require('../db/prisma');
 const { authMiddleware, requireSuperadmin } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Helper: format invitation row with invited_by_name (matches existing API shape)
+function formatInvitation({ invitedBy, ...inv }) {
+  return { ...inv, invited_by_name: invitedBy?.name ?? null };
+}
+
 // Public: get invitation details
 router.get('/invite/:token', async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT i.*, u.name AS invited_by_name FROM invitations i
-       JOIN users u ON u.id = i.invited_by
-       WHERE i.token = ? AND i.accepted_at IS NULL AND i.expires_at > NOW()`,
-      [req.params.token]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Invitation not found or expired' });
-    const inv = rows[0];
-    res.json({ email: inv.email, role: inv.role, invited_by: inv.invited_by_name });
+    const inv = await prisma.invitation.findUnique({
+      where: { token: req.params.token },
+      include: { invitedBy: { select: { name: true } } },
+    });
+    if (!inv || inv.accepted_at !== null || !inv.expires_at || inv.expires_at < new Date()) {
+      return res.status(404).json({ error: 'Invitation not found or expired' });
+    }
+    res.json({ email: inv.email, role: inv.role, invited_by: inv.invitedBy.name });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -30,26 +34,24 @@ router.post('/invite/:token/accept', async (req, res) => {
   if (!name || !password) return res.status(400).json({ error: 'Name and password required' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   try {
-    const [rows] = await pool.query(
-      `SELECT * FROM invitations WHERE token = ? AND accepted_at IS NULL AND expires_at > NOW()`,
-      [req.params.token]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Invitation not found or expired' });
-    const inv = rows[0];
+    const inv = await prisma.invitation.findUnique({
+      where: { token: req.params.token },
+    });
+    if (!inv || inv.accepted_at !== null || !inv.expires_at || inv.expires_at < new Date()) {
+      return res.status(404).json({ error: 'Invitation not found or expired' });
+    }
 
-    // Check if email already exists
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [inv.email]);
-    if (existing.length) return res.status(409).json({ error: 'Email already registered' });
+    const existing = await prisma.user.findUnique({ where: { email: inv.email } });
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
 
-    const passwordHash = await bcrypt.hash(password, 12);
-    await pool.query(
-      'INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
-      [inv.email, passwordHash, name, inv.role]
-    );
-    await pool.query(
-      'UPDATE invitations SET accepted_at = NOW() WHERE id = ?',
-      [inv.id]
-    );
+    const password_hash = await bcrypt.hash(password, 12);
+    await prisma.user.create({
+      data: { email: inv.email, password_hash, name, role: inv.role },
+    });
+    await prisma.invitation.update({
+      where: { id: inv.id },
+      data: { accepted_at: new Date() },
+    });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -62,14 +64,17 @@ router.use(authMiddleware);
 
 router.get('/', requireSuperadmin, async (req, res) => {
   try {
-    const [users] = await pool.query(
-      'SELECT id, email, name, role, is_active, last_login, created_at FROM users ORDER BY created_at ASC'
-    );
-    const [invitations] = await pool.query(
-      `SELECT i.*, u.name AS invited_by_name FROM invitations i
-       JOIN users u ON u.id = i.invited_by
-       ORDER BY i.created_at DESC`
-    );
+    const [users, invitationsRaw] = await Promise.all([
+      prisma.user.findMany({
+        select: { id: true, email: true, name: true, role: true, is_active: true, last_login: true, created_at: true },
+        orderBy: { created_at: 'asc' },
+      }),
+      prisma.invitation.findMany({
+        include: { invitedBy: { select: { name: true } } },
+        orderBy: { created_at: 'desc' },
+      }),
+    ]);
+    const invitations = invitationsRaw.map(formatInvitation);
     res.json({ users, invitations });
   } catch (err) {
     console.error(err);
@@ -81,31 +86,27 @@ router.post('/invite', requireSuperadmin, async (req, res) => {
   const { email, role = 'collaborator' } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
   if (role !== 'collaborator') return res.status(400).json({ error: 'Can only invite collaborators' });
+  const normalizedEmail = email.toLowerCase().trim();
+  if (normalizedEmail === req.user.email) {
+    return res.status(400).json({ error: 'Cannot invite yourself' });
+  }
   try {
-    // Check if user already exists
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email.toLowerCase().trim()]);
-    if (existing.length) return res.status(409).json({ error: 'User already exists' });
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) return res.status(409).json({ error: 'User already exists' });
 
-    // Check for pending invitation
-    const [pendingInv] = await pool.query(
-      'SELECT id FROM invitations WHERE email = ? AND accepted_at IS NULL AND expires_at > NOW()',
-      [email.toLowerCase().trim()]
-    );
-    if (pendingInv.length) return res.status(409).json({ error: 'Pending invitation already exists for this email' });
+    const pendingInv = await prisma.invitation.findFirst({
+      where: { email: normalizedEmail, accepted_at: null, expires_at: { gt: new Date() } },
+    });
+    if (pendingInv) return res.status(409).json({ error: 'Pending invitation already exists for this email' });
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    const [result] = await pool.query(
-      'INSERT INTO invitations (email, token, role, invited_by, expires_at) VALUES (?, ?, ?, ?, ?)',
-      [email.toLowerCase().trim(), token, role, req.user.id, expiresAt]
-    );
-    const [rows] = await pool.query(
-      `SELECT i.*, u.name AS invited_by_name FROM invitations i
-       JOIN users u ON u.id = i.invited_by WHERE i.id = ?`,
-      [result.insertId]
-    );
-    res.status(201).json(rows[0]);
+    const invitation = await prisma.invitation.create({
+      data: { email: normalizedEmail, token, role, invited_by: req.user.id, expires_at: expiresAt },
+      include: { invitedBy: { select: { name: true } } },
+    });
+    res.status(201).json(formatInvitation(invitation));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -113,8 +114,12 @@ router.post('/invite', requireSuperadmin, async (req, res) => {
 });
 
 router.delete('/invitations/:id', requireSuperadmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    await pool.query('DELETE FROM invitations WHERE id = ? AND accepted_at IS NULL', [req.params.id]);
+    const inv = await prisma.invitation.findFirst({ where: { id, accepted_at: null } });
+    if (!inv) return res.status(404).json({ error: 'Invitation not found or already accepted' });
+    await prisma.invitation.delete({ where: { id } });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -123,12 +128,13 @@ router.delete('/invitations/:id', requireSuperadmin, async (req, res) => {
 });
 
 router.patch('/users/:id/deactivate', requireSuperadmin, async (req, res) => {
-  const { id } = req.params;
-  if (parseInt(id) === req.user.id) {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  if (id === req.user.id) {
     return res.status(400).json({ error: 'Cannot deactivate yourself' });
   }
   try {
-    await pool.query('UPDATE users SET is_active = 0 WHERE id = ?', [id]);
+    await prisma.user.update({ where: { id }, data: { is_active: false } });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -137,8 +143,10 @@ router.patch('/users/:id/deactivate', requireSuperadmin, async (req, res) => {
 });
 
 router.patch('/users/:id/activate', requireSuperadmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    await pool.query('UPDATE users SET is_active = 1 WHERE id = ?', [req.params.id]);
+    await prisma.user.update({ where: { id }, data: { is_active: true } });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

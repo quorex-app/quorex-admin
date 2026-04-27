@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CheckSquare, Mail, Users, TrendingUp, ChevronRight } from 'lucide-react';
 import Layout from '../components/Layout';
 import api from '../api/axios';
+import { useToast } from '../hooks/useToast';
 
 function MetricCard({ icon: Icon, label, value, sub, color, to }) {
   return (
@@ -27,13 +28,14 @@ function MetricCard({ icon: Icon, label, value, sub, color, to }) {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const { addToast } = useToast();
 
   useEffect(() => {
     api.get('/dashboard')
       .then(res => setStats(res.data))
-      .catch(console.error)
+      .catch(err => { console.error(err); addToast('Failed to load dashboard stats', 'error'); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [addToast]);
 
   return (
     <Layout>

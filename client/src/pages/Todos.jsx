@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+﻿import { useEffect, useState, useCallback } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Plus, Trash2, Edit2, Check, X, GripVertical, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
+import Modal from '../components/Modal';
 import ProgressBar from '../components/ProgressBar';
 import api from '../api/axios';
 import { useAuth } from '../hooks/useAuth';
@@ -108,7 +109,7 @@ function TodoItem({ item, phaseKey, isSuperadmin, onToggle, onEdit, onDelete, dr
       )}
       <button
         onClick={() => onToggle(item.id, !item.is_done)}
-        className={`mt-0.5 flex-shrink-0 w-4.5 h-4.5 rounded border-2 flex items-center justify-center transition-colors ${
+        className={`mt-0.5 rounded border-2 flex items-center justify-center transition-colors ${
           item.is_done ? 'bg-indigo-500 border-indigo-500' : 'border-gray-300 hover:border-indigo-400'
         }`}
         style={{ width: 18, height: 18, minWidth: 18 }}
@@ -211,6 +212,7 @@ export default function Todos() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [addingPhase, setAddingPhase] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const { user } = useAuth();
   const { addToast } = useToast();
   const isSuperadmin = user?.role === 'superadmin';
@@ -229,12 +231,12 @@ export default function Todos() {
   useEffect(() => { fetchTodos(); }, [fetchTodos]);
 
   const handleToggle = async (id, is_done) => {
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, is_done: is_done ? 1 : 0 } : t));
+    setTodos(prev => prev.map(t => t.id === id ? { ...t, is_done } : t));
     try {
       await api.patch(`/todos/${id}`, { is_done });
     } catch {
       addToast('Failed to update todo', 'error');
-      setTodos(prev => prev.map(t => t.id === id ? { ...t, is_done: is_done ? 0 : 1 } : t));
+      setTodos(prev => prev.map(t => t.id === id ? { ...t, is_done: !is_done } : t));
     }
   };
 
@@ -243,8 +245,13 @@ export default function Todos() {
     setTodos(prev => prev.map(t => t.id === id ? res.data : t));
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this todo?')) return;
+  const handleDelete = (id) => {
+    setConfirmDelete(id);
+  };
+
+  const handleConfirmDelete = async () => {
+    const id = confirmDelete;
+    setConfirmDelete(null);
     setTodos(prev => prev.filter(t => t.id !== id));
     try {
       await api.delete(`/todos/${id}`);
@@ -262,7 +269,7 @@ export default function Todos() {
 
   const handleDragEnd = async (result) => {
     if (!result.destination) return;
-    const { source, destination, draggableId } = result;
+    const { source, destination } = result;
     if (source.droppableId !== destination.droppableId || source.index === destination.index) return;
 
     const phaseKey = source.droppableId;
@@ -271,7 +278,7 @@ export default function Todos() {
     const [moved] = reordered.splice(source.index, 1);
     reordered.splice(destination.index, 0, moved);
 
-    const updated = reordered.map((t, i) => ({ ...t, position: i + 1 }));
+    const updated = reordered.map((t, i) => ({ ...t, position: i }));
     setTodos(prev => [
       ...prev.filter(t => t.phase !== phaseKey),
       ...updated,
@@ -291,11 +298,8 @@ export default function Todos() {
 
   const visiblePhases = filter === 'all' ? PHASES : PHASES.filter(p => p.key === filter);
 
-  const getTodosForPhase = (phaseKey) => {
-    return todos
-      .filter(t => t.phase === phaseKey)
-      .sort((a, b) => a.position - b.position);
-  };
+  const getTodosForPhase = (phaseKey) =>
+    todos.filter(t => t.phase === phaseKey).sort((a, b) => a.position - b.position);
 
   return (
     <Layout>
@@ -423,6 +427,24 @@ export default function Todos() {
           </DragDropContext>
         )}
       </div>
+
+      <Modal open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title="Delete todo?">
+        <p className="text-sm text-gray-600 mb-4">This action cannot be undone.</p>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={() => setConfirmDelete(null)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirmDelete}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Delete
+          </button>
+        </div>
+      </Modal>
     </Layout>
   );
 }
